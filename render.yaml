@@ -1,0 +1,20 @@
+# Nota sobre persistencia: los discos persistentes de Render solo están
+# disponibles en planes de pago (Starter o superior), no en el plan free.
+# Por eso aquí NO se monta un disco: la base SQLite vive dentro del
+# contenedor y se reinicia vacía en cada redeploy o cuando el servicio
+# duerme por inactividad y vuelve a arrancar. Para una demo está bien;
+# si más adelante se pasa a un plan de pago, basta agregar un bloque
+# "disk" (mountPath, por ejemplo /data) y apuntar DATABASE_URL ahí para
+# que los datos sobrevivan a los redeploys.
+services:
+  - type: web
+    name: geo-agentic-travel
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false

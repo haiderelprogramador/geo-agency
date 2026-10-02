@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Geo Agentic Travel</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%A7%AD</text></svg>" />
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #161d2e;
+    --panel-2: #1d2740;
+    --border: #2a3352;
+    --text: #e8ecf7;
+    --muted: #93a0c2;
+    --accent: #5b8cff;
+    --accent-2: #7ad3ff;
+    --good: #4fd18b;
+    --bad: #ff6b6b;
+    --warn: #ffc24b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #1b2742 0%, var(--bg) 60%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 28px 24px 10px;
+    text-align: center;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 1.8rem;
+    letter-spacing: -0.02em;
+  }
+  header p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 16px 20px 60px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 18px;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  input, select {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 10px;
+    border-radius: 8px;
+    font-size: 0.92rem;
+  }
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .actions {
+    margin-top: 16px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 9px;
+    padding: 10px 16px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: transform 0.08s ease, opacity 0.15s ease;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #0b1020;
+  }
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .btn-sm {
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    border-radius: 7px;
+  }
+  .btn-like { background: rgba(79, 209, 139, 0.15); color: var(--good); border: 1px solid rgba(79, 209, 139, 0.35); }
+  .btn-dislike { background: rgba(255, 107, 107, 0.12); color: var(--bad); border: 1px solid rgba(255, 107, 107, 0.3); }
+  .btn-closed { background: rgba(255, 194, 75, 0.12); color: var(--warn); border: 1px solid rgba(255, 194, 75, 0.3); }
+  .btn-remove { background: rgba(255, 107, 107, 0.08); color: var(--bad); border: 1px solid rgba(255, 107, 107, 0.2); }
+
+  #status { color: var(--muted); font-size: 0.85rem; min-height: 1.2em; }
+  #status.error { color: var(--bad); }
+  #status.ok { color: var(--good); }
+
+  .plan-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .plan-header h2 { margin: 0; font-size: 1.2rem; }
+  .plan-header .plan-id { color: var(--muted); font-size: 0.75rem; font-family: monospace; }
+
+  .profile-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .pill {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 11px;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .pill b { color: var(--text); }
+
+  .stop {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .stop-reorder {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stop-reorder button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    width: 26px;
+    height: 22px;
+    padding: 0;
+    font-size: 0.7rem;
+    border-radius: 5px;
+  }
+  .stop-body { flex: 1; min-width: 0; }
+  .stop-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .stop-name { font-weight: 600; font-size: 1rem; }
+  .stop-score { color: var(--accent-2); font-size: 0.78rem; font-family: monospace; }
+  .badges { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+  .badge {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .badge.day { color: var(--accent-2); border-color: rgba(122, 211, 255, 0.3); }
+  .badge.sentiment-positivo { color: var(--good); border-color: rgba(79, 209, 139, 0.3); }
+  .badge.sentiment-negativo { color: var(--bad); border-color: rgba(255, 107, 107, 0.3); }
+  .badge.sentiment-neutro { color: var(--muted); }
+  .reason { color: var(--muted); font-size: 0.85rem; margin: 6px 0 10px; line-height: 1.4; }
+  .stop-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .empty { text-align: center; color: var(--muted); padding: 30px 0; }
+  #map {
+    height: 320px;
+    border-radius: 12px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+  }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: var(--panel-2);
+    color: var(--text);
+  }
+  .day-marker {
+    background: var(--accent);
+    color: #0b1020;
+    width: 26px; height: 26px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+    font-size: 0.78rem;
+    border: 2px solid #0b1020;
+  }
+  .day-marker span { transform: rotate(45deg); }
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🧭 Geo Agentic Travel</h1>
+  <p>Recomendaciones geográficas personalizadas, validadas con reseñas reales</p>
+</header>
+
+<main>
+  <div class="card">
+    <div class="form-grid">
+      <div>
+        <label>Traveler ID</label>
+        <input id="travelerId" value="demo" />
+      </div>
+      <div>
+        <label>Ciudad</label>
+        <input id="city" value="Cartagena" />
+      </div>
+      <div>
+        <label>Latitud</label>
+        <input id="latitude" value="10.4" />
+      </div>
+      <div>
+        <label>Longitud</label>
+        <input id="longitude" value="-75.55" />
+      </div>
+      <div>
+        <label>Días</label>
+        <input id="days" type="number" min="1" max="7" value="2" />
+      </div>
+      <div>
+        <label>Radio (m)</label>
+        <input id="radiusM" type="number" min="200" max="50000" value="2000" />
+      </div>
+      <div>
+        <label>Rating mínimo</label>
+        <input id="minRating" type="number" min="0" max="5" step="0.1" placeholder="sin filtro" />
+      </div>
+      <div>
+        <label>Presupuesto máx.</label>
+        <select id="maxPriceLevel">
+          <option value="">sin filtro</option>
+          <option value="0">Gratis</option>
+          <option value="1">$ Económico</option>
+          <option value="2">$$ Moderado</option>
+          <option value="3">$$$ Caro</option>
+          <option value="4">$$$$ Muy caro</option>
+        </select>
+      </div>
+      <div>
+        <label>Horario</label>
+        <select id="openNow">
+          <option value="">cualquiera</option>
+          <option value="true">Solo abiertos ahora</option>
+        </select>
+      </div>
+      <div>
+        <label>Idioma</label>
+        <select id="language">
+          <option value="es">Español</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn-primary" id="generateBtn" onclick="generatePlan()">✨ Generar plan</button>
+      <button class="btn-ghost" id="loadLastBtn" onclick="loadLastPlan()">↺ Cargar último plan</button>
+      <span id="status"></span>
+    </div>
+  </div>
+
+  <div id="planContainer"></div>
+</main>
+
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script>
+const API = "";
+let currentPlanId = null;
+let currentTravelerId = "demo";
+
+function setStatus(msg, kind) {
+  const el = document.getElementById("status");
+  el.textContent = msg || "";
+  el.className = kind || "";
+}
+
+function setBusy(busy) {
+  document.getElementById("generateBtn").disabled = busy;
+}
+
+async function api(path, options) {
+  const res = await fetch(API + path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+async function generatePlan() {
+  const travelerId = document.getElementById("travelerId").value.trim() || "demo";
+  const payload = {
+    traveler_id: travelerId,
+    city: document.getElementById("city").value.trim() || "Cartagena",
+    latitude: parseFloat(document.getElementById("latitude").value),
+    longitude: parseFloat(document.getElementById("longitude").value),
+    days: parseInt(document.getElementById("days").value, 10) || 1,
+    radius_m: parseInt(document.getElementById("radiusM").value, 10) || 2000,
+    language: document.getElementById("language").value,
+  };
+  const minRating = document.getElementById("minRating").value;
+  if (minRating !== "") payload.min_rating = parseFloat(minRating);
+  const maxPriceLevel = document.getElementById("maxPriceLevel").value;
+  if (maxPriceLevel !== "") payload.max_price_level = parseInt(maxPriceLevel, 10);
+  if (document.getElementById("openNow").value === "true") payload.open_now = true;
+
+  setBusy(true);
+  setStatus("Generando plan (puede tardar unos segundos — consulta Google Places y analiza reseñas)...");
+  try {
+    const plan = await api("/plan/generate", { method: "POST", body: JSON.stringify(payload) });
+    currentTravelerId = travelerId;
+    localStorage.setItem("geo_travel_last_plan", JSON.stringify({ planId: plan.plan_id, travelerId }));
+    renderPlan(plan);
+    setStatus(`Plan generado (${plan.stops.length} paradas).`, "ok");
+  } catch (err) {
+    setStatus("Error: " + err.message, "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function loadLastPlan() {
+  const saved = localStorage.getItem("geo_travel_last_plan");
+  if (!saved) { setStatus("No hay un plan guardado en este navegador todavía.", "error"); return; }
+  const { planId, travelerId } = JSON.parse(saved);
+  setStatus("Cargando...");
+  try {
+    const plan = await api(`/plan/${planId}`);
+    currentTravelerId = travelerId;
+    renderPlan(plan);
+    setStatus("Plan cargado.", "ok");
+  } catch (err) {
+    setStatus("Ese plan ya no existe: " + err.message, "error");
+  }
+}
+
+function sentimentLabel(s) {
+  if (s === "positivo") return "👍 positivo";
+  if (s === "negativo") return "👎 negativo";
+  if (s === "neutro") return "😐 neutro";
+  return "sin reseñas";
+}
+
+function priceLabel(level) {
+  if (level === null || level === undefined) return null;
+  if (level === 0) return "Gratis";
+  return "$".repeat(level);
+}
+
+function openNowLabel(openNow) {
+  if (openNow === true) return { text: "🟢 abierto ahora", cls: "sentiment-positivo" };
+  if (openNow === false) return { text: "🔴 cerrado ahora", cls: "sentiment-negativo" };
+  return null;
+}
+
+function renderPlan(plan) {
+  currentPlanId = plan.plan_id;
+  window.__lastStopIds = plan.stops.map((s) => s.place.id);
+  const container = document.getElementById("planContainer");
+  const profileHtml = Object.entries(plan.taste_profile)
+    .map(([cat, w]) => `<span class="pill">${cat}: <b>${w.toFixed(2)}</b></span>`)
+    .join("");
+
+  if (plan.stops.length === 0) {
+    container.innerHTML = `
+      <div class="card">
+        <div class="plan-header">
+          <h2>${plan.city}</h2>
+          <span class="plan-id">${plan.plan_id}</span>
+        </div>
+        <div class="profile-row">${profileHtml}</div>
+        <div class="empty">No quedan paradas en este plan.</div>
+      </div>`;
+    return;
+  }
+
+  const stopsHtml = plan.stops.map((stop, i) => {
+    const p = stop.place;
+    const sentimentClass = `sentiment-${p.review_sentiment || "neutro"}`;
+    const price = priceLabel(p.price_level);
+    const openNow = openNowLabel(p.open_now);
+    return `
+      <div class="stop">
+        <div class="stop-reorder">
+          <button ${i === 0 ? "disabled" : ""} onclick="moveStop(${i}, -1)" title="Subir">▲</button>
+          <button ${i === plan.stops.length - 1 ? "disabled" : ""} onclick="moveStop(${i}, 1)" title="Bajar">▼</button>
+        </div>
+        <div class="stop-body">
+          <div class="stop-top">
+            <span class="stop-name">${i + 1}. ${p.name}</span>
+            <span class="stop-score">score ${p.score ?? "—"}</span>
+          </div>
+          <div class="badges">
+            <span class="badge day">Día ${stop.day_number}</span>
+            <span class="badge">${p.category}</span>
+            <span class="badge">★ ${p.avg_rating ?? "—"}</span>
+            <span class="badge ${sentimentClass}">${sentimentLabel(p.review_sentiment)}</span>
+            ${price ? `<span class="badge">${price}</span>` : ""}
+            ${openNow ? `<span class="badge ${openNow.cls}">${openNow.text}</span>` : ""}
+          </div>
+          <div class="reason">${p.reason || ""}</div>
+          <div class="stop-actions">
+            <button class="btn-sm btn-like" onclick="giveFeedback('${p.id}', true)">👍 Me gustó</button>
+            <button class="btn-sm btn-dislike" onclick="giveFeedback('${p.id}', false)">👎 No me gustó</button>
+            <button class="btn-sm btn-closed" onclick="reportClosed('${p.id}')">🚫 Reportar cerrado</button>
+            <button class="btn-sm btn-remove" onclick="removeStop('${p.id}')">🗑 Quitar</button>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="plan-header">
+        <h2>${plan.city}</h2>
+        <span class="plan-id">${plan.plan_id}</span>
+      </div>
+      <div class="profile-row">${profileHtml}</div>
+      <div id="map"></div>
+      ${stopsHtml}
+    </div>`;
+
+  updateMap(plan.stops);
+}
+
+function updateMap(stops) {
+  if (window.__leafletMap) {
+    window.__leafletMap.remove();
+    window.__leafletMap = null;
+  }
+  const mapEl = document.getElementById("map");
+  if (!mapEl || typeof L === "undefined") return;
+
+  const map = L.map("map");
+  window.__leafletMap = map;
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+    maxZoom: 19,
+  }).addTo(map);
+
+  const markers = stops.map((stop, i) => {
+    const p = stop.place;
+    const icon = L.divIcon({
+      className: "",
+      html: `<div class="day-marker"><span>${i + 1}</span></div>`,
+      iconSize: [26, 26],
+      iconAnchor: [13, 26],
+    });
+    const marker = L.marker([p.latitude, p.longitude], { icon }).addTo(map);
+    marker.bindPopup(`<b>${i + 1}. ${p.name}</b><br/>Día ${stop.day_number} · ${p.category}`);
+    return marker;
+  });
+
+  if (markers.length === 1) {
+    map.setView([stops[0].place.latitude, stops[0].place.longitude], 15);
+  } else {
+    const group = L.featureGroup(markers);
+    map.fitBounds(group.getBounds().pad(0.2));
+  }
+}
+
+async function moveStop(index, direction) {
+  const ids = window.__lastStopIds;
+  const target = index + direction;
+  if (!ids || target < 0 || target >= ids.length) return;
+  [ids[index], ids[target]] = [ids[target], ids[index]];
+  setStatus("Reordenando...");
+  try {
+    const plan = await api(`/plan/${currentPlanId}/stops/reorder`, {
+      method: "PATCH",
+      body: JSON.stringify({ place_ids: ids }),
+    });
+    renderPlan(plan);
+    setStatus("Orden actualizado.", "ok");
+  } catch (err) {
+    setStatus("Error: " + err.message, "error");
+  }
+}
+
+async function giveFeedback(placeId, liked) {
+  setStatus(liked ? "Guardando 👍..." : "Guardando 👎...");
+  try {
+    const result = await api(`/travelers/${currentTravelerId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ place_id: placeId, liked }),
+    });
+    setStatus("Perfil actualizado: " + JSON.stringify(result.taste_profile), "ok");
+  } catch (err) {
+    setStatus("Error: " + err.message, "error");
+  }
+}
+
+async function reportClosed(placeId) {
+  setStatus("Recalculando plan sin ese lugar...");
+  try {
+    const plan = await api(`/plan/${currentPlanId}/events`, {
+      method: "POST",
+      body: JSON.stringify({ event_type: "place_closed", place_id: placeId, reason: "reportado desde la app" }),
+    });
+    renderPlan(plan);
+    setStatus("Plan recalculado.", "ok");
+  } catch (err) {
+    setStatus("Error: " + err.message, "error");
+  }
+}
+
+async function removeStop(placeId) {
+  setStatus("Quitando parada...");
+  try {
+    const plan = await api(`/plan/${currentPlanId}/stops/${placeId}`, { method: "DELETE" });
+    renderPlan(plan);
+    setStatus("Parada eliminada.", "ok");
+  } catch (err) {
+    setStatus("Error: " + err.message, "error");
+  }
+}
+</script>
+
+</body>
+</html>
