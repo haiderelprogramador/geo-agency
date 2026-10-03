@@ -220,6 +220,61 @@
     border: 2px solid #0b1020;
   }
   .day-marker span { transform: rotate(45deg); }
+
+  .taste-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .taste-item {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .taste-item .taste-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .taste-levels {
+    display: flex;
+    gap: 6px;
+  }
+  .taste-levels button {
+    flex: 1;
+    padding: 6px 4px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 7px;
+  }
+  .taste-levels button.active {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #0b1020;
+    border-color: transparent;
+    font-weight: 700;
+  }
+  .geo-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    margin-bottom: 12px;
+  }
+  .geo-row > div { flex: 1; }
+  #geoStatus { color: var(--muted); font-size: 0.78rem; margin-top: 4px; min-height: 1em; }
+  .section-label {
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 2px 0 10px;
+  }
   .spinner {
     display: inline-block;
     width: 14px; height: 14px;
@@ -251,6 +306,9 @@
         <label>Ciudad</label>
         <input id="city" value="Cartagena" />
       </div>
+    </div>
+
+    <div class="geo-row">
       <div>
         <label>Latitud</label>
         <input id="latitude" value="10.4" />
@@ -259,6 +317,14 @@
         <label>Longitud</label>
         <input id="longitude" value="-75.55" />
       </div>
+      <button class="btn-ghost btn-sm" type="button" onclick="useMyLocation()" id="geoBtn">📍 Usar mi ubicación</button>
+    </div>
+    <div id="geoStatus"></div>
+
+    <p class="section-label">¿Qué te gusta? (ajusta según tu plan)</p>
+    <div class="taste-grid" id="tasteGrid"></div>
+
+    <div class="form-grid" style="margin-top: 14px;">
       <div>
         <label>Días</label>
         <input id="days" type="number" min="1" max="7" value="2" />
@@ -313,6 +379,77 @@ const API = "";
 let currentPlanId = null;
 let currentTravelerId = "demo";
 
+// RF1: gustos explícitos — mismas categorías que el backend reconoce
+// (app/agents/tools.py CATEGORY_TO_GOOGLE_TYPES). 3 niveles simples en vez
+// de un slider: más rápido de usar desde el celular y ya cubre el rango
+// que el ranking necesita (0.1 / 0.6 / 0.9).
+const TASTE_CATEGORIES = [
+  { key: "gastronomía", label: "🍴 Gastronomía" },
+  { key: "cultura", label: "🏛️ Cultura" },
+  { key: "naturaleza", label: "🌳 Naturaleza" },
+  { key: "vida_nocturna", label: "🌃 Vida nocturna" },
+];
+const TASTE_LEVELS = [
+  { value: 0.1, label: "No me interesa" },
+  { value: 0.6, label: "Me gusta" },
+  { value: 0.9, label: "Me encanta" },
+];
+const tasteState = Object.fromEntries(TASTE_CATEGORIES.map((c) => [c.key, 0.6]));
+
+function renderTasteGrid() {
+  const grid = document.getElementById("tasteGrid");
+  grid.innerHTML = TASTE_CATEGORIES.map((cat) => `
+    <div class="taste-item">
+      <div class="taste-label"><span>${cat.label}</span></div>
+      <div class="taste-levels" id="taste-${cat.key}">
+        ${TASTE_LEVELS.map((lvl) => `
+          <button type="button"
+            class="${tasteState[cat.key] === lvl.value ? "active" : ""}"
+            onclick="setTasteLevel('${cat.key}', ${lvl.value})">${lvl.label}</button>
+        `).join("")}
+      </div>
+    </div>
+  `).join("");
+}
+
+function setTasteLevel(category, value) {
+  tasteState[category] = value;
+  renderTasteGrid();
+}
+
+function syncTasteGridFromProfile(profile) {
+  if (!profile) return;
+  for (const cat of TASTE_CATEGORIES) {
+    if (typeof profile[cat.key] === "number") tasteState[cat.key] = profile[cat.key];
+  }
+  renderTasteGrid();
+}
+
+function useMyLocation() {
+  const geoStatus = document.getElementById("geoStatus");
+  if (!navigator.geolocation) {
+    geoStatus.textContent = "Tu navegador no soporta geolocalización — escribe la latitud/longitud a mano.";
+    return;
+  }
+  geoStatus.textContent = "Buscando tu ubicación...";
+  document.getElementById("geoBtn").disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      document.getElementById("latitude").value = pos.coords.latitude.toFixed(6);
+      document.getElementById("longitude").value = pos.coords.longitude.toFixed(6);
+      geoStatus.textContent = "📍 Ubicación detectada.";
+      document.getElementById("geoBtn").disabled = false;
+    },
+    (err) => {
+      geoStatus.textContent = "No se pudo obtener tu ubicación (" + err.message + "). Escríbela a mano.";
+      document.getElementById("geoBtn").disabled = false;
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+renderTasteGrid();
+
 function setStatus(msg, kind) {
   const el = document.getElementById("status");
   el.textContent = msg || "";
@@ -345,6 +482,7 @@ async function generatePlan() {
     days: parseInt(document.getElementById("days").value, 10) || 1,
     radius_m: parseInt(document.getElementById("radiusM").value, 10) || 2000,
     language: document.getElementById("language").value,
+    taste_profile: { ...tasteState },
   };
   const minRating = document.getElementById("minRating").value;
   if (minRating !== "") payload.min_rating = parseFloat(minRating);
@@ -404,6 +542,7 @@ function openNowLabel(openNow) {
 function renderPlan(plan) {
   currentPlanId = plan.plan_id;
   window.__lastStopIds = plan.stops.map((s) => s.place.id);
+  syncTasteGridFromProfile(plan.taste_profile);
   const container = document.getElementById("planContainer");
   const profileHtml = Object.entries(plan.taste_profile)
     .map(([cat, w]) => `<span class="pill">${cat}: <b>${w.toFixed(2)}</b></span>`)

@@ -61,8 +61,11 @@ def generate_plan(req: PlanRequest, db: Session = Depends(get_db)) -> PlanRespon
 
     # Si ya existe un perfil de gustos guardado para este traveler, lo
     # reusamos (memoria de largo plazo, RF1) en vez de caer siempre al
-    # perfil neutro de ejemplo.
+    # perfil neutro de ejemplo. Pero si la persona manda gustos explícitos
+    # en este request (los eligió a mano en el formulario), esos mandan —
+    # así puede ajustar sus preferencias en cada búsqueda.
     traveler = repository.get_or_create_traveler(db, req.traveler_id)
+    effective_profile = req.taste_profile or traveler.taste_profile
 
     result = graph.invoke(
         {
@@ -76,7 +79,7 @@ def generate_plan(req: PlanRequest, db: Session = Depends(get_db)) -> PlanRespon
             "min_rating": req.min_rating,
             "max_price_level": req.max_price_level,
             "open_now": req.open_now,
-            "taste_profile": traveler.taste_profile,
+            "taste_profile": effective_profile,
             "candidate_places": [],
             "ranked_places": [],
             "plan_stops": [],

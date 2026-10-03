@@ -12,6 +12,11 @@ class PlanRequest(BaseModel):
     min_rating: float | None = None  # RF8: filtro explícito, ej. 4.0 = solo 4+ estrellas
     max_price_level: int | None = None  # RF8: 0 (gratis) a 4 (muy caro) — presupuesto máximo
     open_now: bool | None = None  # RF8: True = solo lugares abiertos ahora mismo
+    taste_profile: dict[str, float] | None = None  # RF1: gustos explícitos del formulario
+    # (ej. {"gastronomía": 0.9, "cultura": 0.3}). Si se manda, tiene
+    # prioridad sobre el perfil ya guardado del traveler — así la persona
+    # puede ajustar sus gustos en cada búsqueda y no queda atada para
+    # siempre al primer perfil que generó.
 
 
 class PlaceOut(BaseModel):
