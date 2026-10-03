@@ -100,7 +100,7 @@ class PlanStop(Base):
     place_id: Mapped[str] = mapped_column(ForeignKey("places.id"))
     day_number: Mapped[int] = mapped_column(default=1)
     order_index: Mapped[int] = mapped_column(default=0)
-    scheduled_time: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "09:00"
+    scheduled_time: Mapped[str | None] = mapped_column(String(20), nullable=True)  # "09:00-10:30"
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)  # explicación (RF9)
     # Snapshot del momento del plan: el score y el sentimiento dependen del
     # perfil de gustos de ESE plan y de las reseñas vigentes en ese momento,

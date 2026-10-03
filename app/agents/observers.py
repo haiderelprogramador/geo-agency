@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from app.agents.scheduling import assign_schedule
 from app.db import repository
 from app.db.models import TripPlan
 
@@ -48,17 +49,8 @@ def _repack_stops_without(ranked_places: list[dict], days: int) -> list[dict]:
     """Reconstruye las paradas del itinerario a partir de los lugares que
     sobreviven al evento de contexto, repartidos en los mismos `days` del
     plan original (misma lógica round-robin que build_itinerary)."""
-    stops = []
-    for i, place in enumerate(ranked_places):
-        stops.append(
-            {
-                "day_number": (i % days) + 1,
-                "order_index": i // days,
-                "place": place,
-                "scheduled_time": None,
-            }
-        )
-    return stops
+    stops = [{"day_number": (i % days) + 1, "order_index": i // days, "place": place} for i, place in enumerate(ranked_places)]
+    return assign_schedule(stops)
 
 
 def make_recalculate_observer(db) -> Observer:

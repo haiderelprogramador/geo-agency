@@ -8,6 +8,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agents.scheduling import assign_schedule
 from app.agents.state import Place as PlaceState
 from app.db.models import AgentEventLog, Feedback, Place as PlaceModel
 from app.db.models import PlanStop, Traveler, TripPlan
@@ -185,10 +186,9 @@ def remove_stop(db: Session, trip_plan: TripPlan, place_external_id: str) -> Tri
         for s in sorted(trip_plan.stops, key=lambda s: (s.day_number, s.order_index))
         if s.place.external_id != place_external_id
     ]
-    new_stops = [
-        {"day_number": (i % days) + 1, "order_index": i // days, "place": p, "scheduled_time": None}
-        for i, p in enumerate(survivors)
-    ]
+    new_stops = assign_schedule(
+        [{"day_number": (i % days) + 1, "order_index": i // days, "place": p} for i, p in enumerate(survivors)]
+    )
     return replace_trip_plan_stops(db, trip_plan, new_stops)
 
 
@@ -206,10 +206,9 @@ def reorder_stops(db: Session, trip_plan: TripPlan, ordered_place_external_ids: 
         raise ValueError("El nuevo orden debe incluir todas las paradas del plan, sin repetir.")
 
     ordered_places = [stop_to_place_dict(by_external_id[pid]) for pid in ordered_place_external_ids]
-    new_stops = [
-        {"day_number": (i % days) + 1, "order_index": i // days, "place": p, "scheduled_time": None}
-        for i, p in enumerate(ordered_places)
-    ]
+    new_stops = assign_schedule(
+        [{"day_number": (i % days) + 1, "order_index": i // days, "place": p} for i, p in enumerate(ordered_places)]
+    )
     return replace_trip_plan_stops(db, trip_plan, new_stops)
 
 

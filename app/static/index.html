@@ -581,6 +581,7 @@ function renderPlan(plan) {
           </div>
           <div class="badges">
             <span class="badge day">Día ${stop.day_number}</span>
+            ${stop.scheduled_time ? `<span class="badge">🕒 ${stop.scheduled_time}</span>` : ""}
             <span class="badge">${p.category}</span>
             <span class="badge">★ ${p.avg_rating ?? "—"}</span>
             <span class="badge ${sentimentClass}">${sentimentLabel(p.review_sentiment)}</span>
@@ -718,9 +719,8 @@ const NARRATION_STRINGS = {
     intro: (city, days, stops) =>
       `Este es tu plan para ${city}: ${stops} ${stops === 1 ? "lugar" : "lugares"} en ${days} ${days === 1 ? "día" : "días"}.`,
     day: (n) => `Día ${n}.`,
-    first: "Primero,",
-    then: "Luego,",
-    finally: "Y para cerrar,",
+    timeRange: (start, end) => `De ${start} a ${end},`,
+    noTime: "Luego,",
     noReason: "un lugar que te puede gustar.",
     outro: "Eso es todo. ¡Buen viaje!",
   },
@@ -728,13 +728,21 @@ const NARRATION_STRINGS = {
     intro: (city, days, stops) =>
       `Here's your plan for ${city}: ${stops} ${stops === 1 ? "place" : "places"} over ${days} ${days === 1 ? "day" : "days"}.`,
     day: (n) => `Day ${n}.`,
-    first: "First,",
-    then: "Then,",
-    finally: "Finally,",
+    timeRange: (start, end) => `From ${start} to ${end},`,
+    noTime: "Then,",
     noReason: "a place you might enjoy.",
     outro: "That's the whole plan. Have a great trip!",
   },
 };
+
+// Convierte "09:00-10:30" en algo que suene natural al leerlo en voz alta
+// ("9:00" en vez de "09:00", que la síntesis de voz a veces lee como "cero
+// nueve cero cero").
+function spokenHour(hhmm) {
+  const [h, m] = hhmm.split(":");
+  const hour = parseInt(h, 10);
+  return m === "00" ? `${hour}:00` : `${hour}:${m}`;
+}
 
 function buildNarrationScript(plan) {
   const lang = document.getElementById("language").value === "en" ? "en" : "es";
@@ -748,10 +756,14 @@ function buildNarrationScript(plan) {
   }
 
   for (const dayNum of Object.keys(byDay).sort((a, b) => a - b)) {
-    const dayStops = byDay[dayNum];
+    const dayStops = byDay[dayNum].sort((a, b) => a.order_index - b.order_index);
     parts.push(t.day(dayNum));
-    dayStops.forEach((stop, i) => {
-      const connector = i === 0 ? t.first : i === dayStops.length - 1 ? t.finally : t.then;
+    dayStops.forEach((stop) => {
+      let connector = t.noTime;
+      if (stop.scheduled_time && stop.scheduled_time.includes("-")) {
+        const [start, end] = stop.scheduled_time.split("-");
+        connector = t.timeRange(spokenHour(start), spokenHour(end));
+      }
       const reason = stop.place.reason || `${stop.place.name}: ${t.noReason}`;
       parts.push(`${connector} ${reason}`);
     });
