@@ -542,6 +542,8 @@ function openNowLabel(openNow) {
 function renderPlan(plan) {
   currentPlanId = plan.plan_id;
   window.__lastStopIds = plan.stops.map((s) => s.place.id);
+  window.__lastPlan = plan;
+  stopNarration();
   syncTasteGridFromProfile(plan.taste_profile);
   const container = document.getElementById("planContainer");
   const profileHtml = Object.entries(plan.taste_profile)
@@ -603,6 +605,9 @@ function renderPlan(plan) {
         <span class="plan-id">${plan.plan_id}</span>
       </div>
       <div class="profile-row">${profileHtml}</div>
+      <div class="actions" style="margin-top: 0; margin-bottom: 16px;">
+        <button class="btn-ghost btn-sm" id="narrateBtn" onclick="toggleNarration()">🔊 Narrar mi plan</button>
+      </div>
       <div id="map"></div>
       ${stopsHtml}
     </div>`;
@@ -700,6 +705,89 @@ async function removeStop(placeId) {
   } catch (err) {
     setStatus("Error: " + err.message, "error");
   }
+}
+
+// --- Narración del plan (texto a voz del navegador, sin servicios pagos) ---
+// El agente ya genera una "reason" explicando por qué eligió cada lugar
+// (ver app/agents/nodes.py _explain, RF9/RF11); esto arma esas razones en
+// un guión narrado día por día y lo lee en voz alta con la síntesis de voz
+// nativa del navegador (Web Speech API) — no necesita ninguna API key ni
+// servicio externo, así que funciona igual en local y en producción.
+const NARRATION_STRINGS = {
+  es: {
+    intro: (city, days, stops) =>
+      `Este es tu plan para ${city}: ${stops} ${stops === 1 ? "lugar" : "lugares"} en ${days} ${days === 1 ? "día" : "días"}.`,
+    day: (n) => `Día ${n}.`,
+    first: "Primero,",
+    then: "Luego,",
+    finally: "Y para cerrar,",
+    noReason: "un lugar que te puede gustar.",
+    outro: "Eso es todo. ¡Buen viaje!",
+  },
+  en: {
+    intro: (city, days, stops) =>
+      `Here's your plan for ${city}: ${stops} ${stops === 1 ? "place" : "places"} over ${days} ${days === 1 ? "day" : "days"}.`,
+    day: (n) => `Day ${n}.`,
+    first: "First,",
+    then: "Then,",
+    finally: "Finally,",
+    noReason: "a place you might enjoy.",
+    outro: "That's the whole plan. Have a great trip!",
+  },
+};
+
+function buildNarrationScript(plan) {
+  const lang = document.getElementById("language").value === "en" ? "en" : "es";
+  const t = NARRATION_STRINGS[lang];
+  const days = Math.max(...plan.stops.map((s) => s.day_number));
+  const parts = [t.intro(plan.city, days, plan.stops.length)];
+
+  const byDay = {};
+  for (const stop of plan.stops) {
+    (byDay[stop.day_number] = byDay[stop.day_number] || []).push(stop);
+  }
+
+  for (const dayNum of Object.keys(byDay).sort((a, b) => a - b)) {
+    const dayStops = byDay[dayNum];
+    parts.push(t.day(dayNum));
+    dayStops.forEach((stop, i) => {
+      const connector = i === 0 ? t.first : i === dayStops.length - 1 ? t.finally : t.then;
+      const reason = stop.place.reason || `${stop.place.name}: ${t.noReason}`;
+      parts.push(`${connector} ${reason}`);
+    });
+  }
+  parts.push(t.outro);
+  return parts.join(" ");
+}
+
+function stopNarration() {
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  const btn = document.getElementById("narrateBtn");
+  if (btn) btn.textContent = "🔊 Narrar mi plan";
+}
+
+function toggleNarration() {
+  if (!window.speechSynthesis) {
+    setStatus("Tu navegador no soporta narración por voz.", "error");
+    return;
+  }
+  if (window.speechSynthesis.speaking) {
+    stopNarration();
+    return;
+  }
+  const plan = window.__lastPlan;
+  if (!plan || plan.stops.length === 0) return;
+
+  const lang = document.getElementById("language").value === "en" ? "en-US" : "es-ES";
+  const utterance = new SpeechSynthesisUtterance(buildNarrationScript(plan));
+  utterance.lang = lang;
+  utterance.rate = 1.0;
+  utterance.onend = stopNarration;
+  utterance.onerror = stopNarration;
+
+  window.speechSynthesis.cancel(); // por si quedó algo pendiente de antes
+  window.speechSynthesis.speak(utterance);
+  document.getElementById("narrateBtn").textContent = "⏹ Detener narración";
 }
 </script>
 
