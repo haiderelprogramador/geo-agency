@@ -52,6 +52,56 @@ def _fetch_cached(lat: float, lon: float, days: int, today: str) -> tuple:
     return tuple(tuple(d.items()) for d in out)
 
 
+MET_NO_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
+MET_NO_RAIN_MM = 1.0  # mm en una ventana de 6 h para considerar el día lluvioso
+
+
+def _fetch_met_no(lat: float, lon: float, days: int) -> tuple:
+    """Respaldo (MET Norway, gratis): Open-Meteo limita por IP a los servidores
+    compartidos de hosting (429). Da mm de lluvia, no probabilidad: por eso
+    rain_probability queda en None y `rainy` se decide por los milímetros."""
+    resp = httpx.get(
+        MET_NO_URL,
+        params={"lat": lat, "lon": lon},
+        headers={"User-Agent": "geo-agentic-travel/1.0 github.com/haiderelprogramador/geo-agency"},
+        timeout=TIMEOUT_S,
+    )
+    resp.raise_for_status()
+    by_day: dict[str, dict] = {}
+    for entry in resp.json()["properties"]["timeseries"]:
+        # hora local aproximada: UTC-5 no se asume; se agrupa por la fecha UTC desplazada con el lon
+        offset_h = round(lon / 15)
+        from datetime import datetime, timedelta, timezone
+
+        local = datetime.fromisoformat(entry["time"].replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=offset_h)))
+        d = by_day.setdefault(local.date().isoformat(), {"mm": 0.0, "temp": None})
+        data = entry["data"]
+        temp = data["instant"]["details"].get("air_temperature")
+        if temp is not None and (d["temp"] is None or temp > d["temp"]):
+            d["temp"] = temp
+        mm = (data.get("next_6_hours") or {}).get("details", {}).get("precipitation_amount")
+        if mm is not None and mm > d["mm"]:
+            d["mm"] = mm
+    out = []
+    for i, day in enumerate(sorted(by_day)[: min(max(days, 1), MAX_FORECAST_DAYS)]):
+        info = by_day[day]
+        out.append(
+            {
+                "day_number": i + 1,
+                "date": day,
+                "rain_probability": None,
+                "temp_max": info["temp"],
+                "rainy": info["mm"] >= MET_NO_RAIN_MM,
+            }
+        )
+    return tuple(tuple(d.items()) for d in out)
+
+
+@lru_cache(maxsize=64)
+def _fetch_met_no_cached(lat: float, lon: float, days: int, today: str) -> tuple:
+    return _fetch_met_no(lat, lon, days)
+
+
 def fetch_daily_forecast(lat: float, lon: float, days: int) -> list[dict]:
     """Pronóstico día a día; el día 1 del plan es hoy. Los fallos NO se
     cachean (la excepción atraviesa lru_cache), así un error puntual no deja
@@ -59,8 +109,12 @@ def fetch_daily_forecast(lat: float, lon: float, days: int) -> list[dict]:
     try:
         raw = _fetch_cached(round(lat, 2), round(lon, 2), days, date.today().isoformat())
     except Exception as exc:
-        logger.warning("Open-Meteo no disponible: %s", exc)
-        return []
+        logger.warning("Open-Meteo no disponible (%s); pruebo MET Norway", exc)
+        try:
+            raw = _fetch_met_no_cached(round(lat, 2), round(lon, 2), days, date.today().isoformat())
+        except Exception as exc2:
+            logger.warning("MET Norway tampoco: %s", exc2)
+            return []
     return [dict(item) for item in raw]
 
 

@@ -787,7 +787,7 @@ async function loadWeather(planId) {
     const box = document.getElementById("weatherBox");
     if (!box) return;
     const chips = w.forecast.map((f) =>
-      `<span class="weather-chip ${f.rainy ? "rainy" : ""}">Día ${f.day_number} ${f.rainy ? "🌧️" : "☀️"} ${f.rain_probability ?? "?"}% lluvia · ${f.temp_max ?? "?"}°</span>`
+      `<span class="weather-chip ${f.rainy ? "rainy" : ""}">Día ${f.day_number} ${f.rainy ? "🌧️" : "☀️"} ${f.rain_probability != null ? f.rain_probability + "% lluvia" : (f.rainy ? "lluvia probable" : "sin lluvia fuerte")} · ${f.temp_max != null ? Math.round(f.temp_max) : "?"}°</span>`
     ).join("");
     const alert = w.at_risk.length
       ? `<div class="weather-alert"><span>🌧️ Se espera lluvia y tienes paradas al aire libre: <b>${w.at_risk.map((r) => `${r.name} (día ${r.day_number})`).join(", ")}</b>.</span>
@@ -881,7 +881,7 @@ const NARRATION_STRINGS = {
     day: (n) => `Día ${n}.`,
     timeRange: (start, end) => `De ${start} a ${end},`,
     withTravel: (minutes) => `Después de ${minutes} minutos de traslado,`,
-    rainy: (prob) => `Ojo: hay ${prob} por ciento de probabilidad de lluvia ese día.`,
+    rainy: (prob) => (prob == null ? "Ojo: se espera lluvia ese día." : `Ojo: hay ${prob} por ciento de probabilidad de lluvia ese día.`),
     noTime: "Luego,",
     noReason: "un lugar que te puede gustar.",
     outro: "Eso es todo. ¡Buen viaje!",
@@ -892,7 +892,7 @@ const NARRATION_STRINGS = {
     day: (n) => `Day ${n}.`,
     timeRange: (start, end) => `From ${start} to ${end},`,
     withTravel: (minutes) => `After a ${minutes} minute transfer,`,
-    rainy: (prob) => `Heads up: ${prob} percent chance of rain that day.`,
+    rainy: (prob) => (prob == null ? "Heads up: rain is expected that day." : `Heads up: ${prob} percent chance of rain that day.`),
     noTime: "Then,",
     noReason: "a place you might enjoy.",
     outro: "That's the whole plan. Have a great trip!",
