@@ -247,6 +247,7 @@ def chat_with_agent(plan_id: str, req: ChatRequest, db: Session = Depends(get_db
     reply = decision["reply"]
     applied: list[str] = []
     regenerate = None
+    excluded: list[str] = []
 
     for action in decision["actions"]:
         if action["type"] == "remove_place":
@@ -264,6 +265,7 @@ def chat_with_agent(plan_id: str, req: ChatRequest, db: Session = Depends(get_db
                 ContextEvent(plan_id=plan_id, event_type="category_unavailable", category=action["category"], reason="pedido en el chat")
             )
             db.refresh(trip_plan)
+            excluded.append(action["category"])
             applied.append(f"Excluded {action['category']}" if en else f"Excluí {action['category']}")
         elif action["type"] == "regenerate":
             regenerate = action
@@ -274,6 +276,8 @@ def chat_with_agent(plan_id: str, req: ChatRequest, db: Session = Depends(get_db
         else:
             traveler = repository.get_or_create_traveler(db, req.context.traveler_id)
             taste = {**(req.context.taste_profile or traveler.taste_profile or {}), **regenerate["taste"]}
+            for cat in excluded:  # lo excluido en este mismo mensaje no debe volver al regenerar
+                taste[cat] = 0.0
             updates = {k: regenerate[k] for k in ("min_rating", "max_price_level", "open_now") if k in regenerate}
             new_req = req.context.model_copy(update={**updates, "taste_profile": taste or None, "language": req.language})
             plan = _generate(new_req, db)

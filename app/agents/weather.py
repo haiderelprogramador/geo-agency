@@ -23,42 +23,44 @@ MAX_FORECAST_DAYS = 16  # límite del pronóstico de Open-Meteo
 @lru_cache(maxsize=64)
 def _fetch_cached(lat: float, lon: float, days: int, today: str) -> tuple:
     """`today` va en la clave para que el caché no sobreviva al cambio de día."""
-    try:
-        resp = httpx.get(
-            OPEN_METEO_URL,
-            params={
-                "latitude": lat,
-                "longitude": lon,
-                "daily": "precipitation_probability_max,temperature_2m_max",
-                "forecast_days": min(max(days, 1), MAX_FORECAST_DAYS),
-                "timezone": "auto",
-            },
-            timeout=TIMEOUT_S,
+    resp = httpx.get(
+        OPEN_METEO_URL,
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "daily": "precipitation_probability_max,temperature_2m_max",
+            "forecast_days": min(max(days, 1), MAX_FORECAST_DAYS),
+            "timezone": "auto",
+        },
+        timeout=TIMEOUT_S,
+    )
+    resp.raise_for_status()
+    daily = resp.json()["daily"]
+    out = []
+    for i, day in enumerate(daily["time"]):
+        rain = daily["precipitation_probability_max"][i]
+        temp = daily["temperature_2m_max"][i]
+        out.append(
+            {
+                "day_number": i + 1,
+                "date": day,
+                "rain_probability": rain,
+                "temp_max": temp,
+                "rainy": rain is not None and rain >= RAIN_THRESHOLD_PCT,
+            }
         )
-        resp.raise_for_status()
-        daily = resp.json()["daily"]
-        out = []
-        for i, day in enumerate(daily["time"]):
-            rain = daily["precipitation_probability_max"][i]
-            temp = daily["temperature_2m_max"][i]
-            out.append(
-                {
-                    "day_number": i + 1,
-                    "date": day,
-                    "rain_probability": rain,
-                    "temp_max": temp,
-                    "rainy": rain is not None and rain >= RAIN_THRESHOLD_PCT,
-                }
-            )
-        return tuple(tuple(d.items()) for d in out)
-    except Exception as exc:
-        logger.warning("Open-Meteo no disponible: %s", exc)
-        return ()
+    return tuple(tuple(d.items()) for d in out)
 
 
 def fetch_daily_forecast(lat: float, lon: float, days: int) -> list[dict]:
-    """Pronóstico día a día; el día 1 del plan es hoy."""
-    raw = _fetch_cached(round(lat, 2), round(lon, 2), days, date.today().isoformat())
+    """Pronóstico día a día; el día 1 del plan es hoy. Los fallos NO se
+    cachean (la excepción atraviesa lru_cache), así un error puntual no deja
+    el clima caído todo el día."""
+    try:
+        raw = _fetch_cached(round(lat, 2), round(lon, 2), days, date.today().isoformat())
+    except Exception as exc:
+        logger.warning("Open-Meteo no disponible: %s", exc)
+        return []
     return [dict(item) for item in raw]
 
 
