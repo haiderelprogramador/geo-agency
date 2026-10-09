@@ -43,3 +43,22 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def ensure_columns(engine: Engine) -> None:
+    """Migración mínima sin Alembic: `create_all` crea tablas que faltan pero
+    NO agrega columnas nuevas a tablas que ya existen, así que una base
+    SQLite creada con una versión anterior fallaría al leer/escribir. Acá se
+    agregan las columnas posteriores a la primera versión si no están."""
+    from sqlalchemy import inspect, text
+
+    additions = {"plan_stops": {"travel_minutes": "INTEGER"}}
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table, columns in additions.items():
+            if table not in inspector.get_table_names():
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for name, ddl_type in columns.items():
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))

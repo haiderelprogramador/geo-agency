@@ -8,7 +8,7 @@ import json
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.agents.scheduling import assign_schedule
+from app.agents.routing import plan_itinerary
 from app.agents.state import GraphState, Place
 from app.agents.tools import fetch_reviews_for_place, haversine_m, search_nearby_places
 from app.config import get_settings
@@ -186,4 +186,4 @@ def build_itinerary(state: GraphState) -> dict:
         day_number = (i % days) + 1
         order_index = i // days
         stops.append({"day_number": day_number, "order_index": order_index, "place": place})
-    return {"plan_stops": assign_schedule(stops)}
+    return {"plan_stops": plan_itinerary(stops, optimize=True)}

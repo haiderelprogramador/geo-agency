@@ -37,6 +37,7 @@ class PlanStopOut(BaseModel):
     day_number: int
     order_index: int
     scheduled_time: str | None
+    travel_minutes: int | None = None  # traslado desde la parada anterior del mismo día
     place: PlaceOut
 
 
@@ -73,3 +74,47 @@ class PlanSummaryOut(BaseModel):
     status: str
     created_at: str
     stop_count: int
+
+
+class DayRouteOut(BaseModel):
+    """Recorrido de un día para dibujarlo en el mapa."""
+
+    day_number: int
+    geometry: list[list[float]]  # [[lat, lon], ...] siguiendo las calles (OSRM) o línea recta (estimación)
+    source: str  # "osrm" | "estimate"
+    total_travel_minutes: int
+
+
+class ChatRequest(BaseModel):
+    message: str
+    language: str = "es"
+    # Parámetros de búsqueda actuales (ubicación, radio, días...). Solo hacen
+    # falta si el mensaje pide armar un plan nuevo ("algo más barato").
+    context: PlanRequest | None = None
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    plan: PlanResponse
+    plan_changed: bool
+    applied: list[str]  # qué hizo el agente, en lenguaje humano
+
+
+class WeatherDayOut(BaseModel):
+    day_number: int
+    date: str
+    rain_probability: int | None
+    temp_max: float | None
+    rainy: bool
+
+
+class AtRiskStopOut(BaseModel):
+    day_number: int
+    place_id: str
+    name: str
+
+
+class WeatherOut(BaseModel):
+    available: bool  # False si el servicio de clima no respondió
+    forecast: list[WeatherDayOut]
+    at_risk: list[AtRiskStopOut]  # paradas al aire libre en días de lluvia probable

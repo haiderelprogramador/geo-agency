@@ -38,10 +38,14 @@ def assign_schedule(stops: list[dict]) -> list[dict]:
     for day_stops in by_day.values():
         day_stops = sorted(day_stops, key=lambda s: s["order_index"])
         cursor = DAY_START_MINUTES
-        for stop in day_stops:
+        for i, stop in enumerate(day_stops):
+            if i > 0:
+                # Traslado real (OSRM/estimación) si el stop lo trae; si no, el
+                # colchón fijo de siempre.
+                cursor += stop.get("travel_minutes") or TRAVEL_BUFFER_MINUTES
             category = stop["place"].get("category")
             duration = CATEGORY_DURATION_MINUTES.get(category, DEFAULT_DURATION_MINUTES)
             start, end = cursor, cursor + duration
             result.append({**stop, "scheduled_time": f"{_format_minutes(start)}-{_format_minutes(end)}"})
-            cursor = end + TRAVEL_BUFFER_MINUTES
+            cursor = end
     return result

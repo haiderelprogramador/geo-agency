@@ -6,18 +6,27 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.agents.graph import get_compiled_graph
+from app.agents import assistant
+from app.agents.routing import fetch_route
+from app.agents.weather import fetch_daily_forecast, outdoor_stops_on_rainy_days
 from app.agents.observers import ContextEvent, PlanContextSubject, make_recalculate_observer
 from app.db import repository
 from app.db.models import TripPlan
 from app.db.session import get_db
 from app.schemas.plan import (
+    AtRiskStopOut,
+    ChatRequest,
+    ChatResponse,
     ContextEventRequest,
+    DayRouteOut,
     PlanRequest,
     PlanResponse,
     PlanSummaryOut,
     PlanStopOut,
     PlaceOut,
     ReorderStopsRequest,
+    WeatherDayOut,
+    WeatherOut,
 )
 
 router = APIRouter(prefix="/plan", tags=["plan"])
@@ -32,6 +41,7 @@ def _trip_plan_to_response(trip_plan: TripPlan) -> PlanResponse:
             day_number=stop.day_number,
             order_index=stop.order_index,
             scheduled_time=stop.scheduled_time,
+            travel_minutes=stop.travel_minutes,
             place=PlaceOut(
                 id=stop.place.external_id,
                 name=stop.place.name,
@@ -57,6 +67,10 @@ def _trip_plan_to_response(trip_plan: TripPlan) -> PlanResponse:
 
 @router.post("/generate", response_model=PlanResponse)
 def generate_plan(req: PlanRequest, db: Session = Depends(get_db)) -> PlanResponse:
+    return _generate(req, db)
+
+
+def _generate(req: PlanRequest, db: Session) -> PlanResponse:
     graph = get_compiled_graph()
 
     # Si ya existe un perfil de gustos guardado para este traveler, lo
@@ -108,6 +122,32 @@ def get_plan(plan_id: str, db: Session = Depends(get_db)) -> PlanResponse:
     if trip_plan is None:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
     return _trip_plan_to_response(trip_plan)
+
+
+@router.get("/{plan_id}/route", response_model=list[DayRouteOut])
+def get_plan_route(plan_id: str, db: Session = Depends(get_db)) -> list[DayRouteOut]:
+    """Recorrido por día (calles reales vía OSRM, o línea recta si no hay
+    servicio) para dibujarlo en el mapa."""
+    trip_plan = repository.get_trip_plan(db, plan_id)
+    if trip_plan is None:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+
+    by_day: dict[int, list] = {}
+    for stop in sorted(trip_plan.stops, key=lambda s: (s.day_number, s.order_index)):
+        by_day.setdefault(stop.day_number, []).append(stop)
+
+    routes = []
+    for day_number, stops in by_day.items():
+        route = fetch_route([(s.place.latitude, s.place.longitude) for s in stops])
+        routes.append(
+            DayRouteOut(
+                day_number=day_number,
+                geometry=route["geometry"],
+                source=route["source"],
+                total_travel_minutes=sum(route["legs_minutes"]),
+            )
+        )
+    return routes
 
 
 @router.post("/{plan_id}/events", response_model=PlanResponse)
@@ -170,3 +210,115 @@ def list_plans(traveler_id: str, db: Session = Depends(get_db)) -> list[PlanSumm
         )
         for p in plans
     ]
+
+
+# --- Agente conversacional y clima ------------------------------------------
+
+def _plan_stops_as_dicts(trip_plan: TripPlan) -> list[dict]:
+    return [
+        {
+            "day_number": s.day_number,
+            "scheduled_time": s.scheduled_time,
+            "place": repository.stop_to_place_dict(s),
+        }
+        for s in sorted(trip_plan.stops, key=lambda s: (s.day_number, s.order_index))
+    ]
+
+
+def _find_stop_by_name(trip_plan: TripPlan, name: str):
+    wanted = name.casefold()
+    for stop in trip_plan.stops:
+        have = stop.place.name.casefold()
+        if wanted in have or have in wanted:
+            return stop
+    return None
+
+
+@router.post("/{plan_id}/chat", response_model=ChatResponse)
+def chat_with_agent(plan_id: str, req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
+    """El agente interpreta un mensaje y modifica el plan. El LLM solo
+    propone acciones de una lista cerrada; acá se validan y ejecutan."""
+    trip_plan = repository.get_trip_plan(db, plan_id)
+    if trip_plan is None:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+
+    en = req.language == "en"
+    decision = assistant.interpret_message(req.message, _plan_stops_as_dicts(trip_plan), req.language)
+    reply = decision["reply"]
+    applied: list[str] = []
+    regenerate = None
+
+    for action in decision["actions"]:
+        if action["type"] == "remove_place":
+            stop = _find_stop_by_name(trip_plan, action["name"])
+            if stop is None:
+                reply += f" I couldn't find “{action['name']}” in your plan." if en else f" No encontré «{action['name']}» en tu plan."
+                continue
+            name = stop.place.name
+            trip_plan = repository.drop_stops(db, trip_plan, [stop.place.external_id])
+            applied.append(f"Removed {name}" if en else f"Quité {name}")
+        elif action["type"] == "exclude_category":
+            subject = PlanContextSubject()
+            subject.subscribe(make_recalculate_observer(db))
+            subject.notify(
+                ContextEvent(plan_id=plan_id, event_type="category_unavailable", category=action["category"], reason="pedido en el chat")
+            )
+            db.refresh(trip_plan)
+            applied.append(f"Excluded {action['category']}" if en else f"Excluí {action['category']}")
+        elif action["type"] == "regenerate":
+            regenerate = action
+
+    if regenerate is not None:
+        if req.context is None:
+            reply += " To build a new plan I need the search form data." if en else " Para armar un plan nuevo necesito los datos del formulario de búsqueda."
+        else:
+            traveler = repository.get_or_create_traveler(db, req.context.traveler_id)
+            taste = {**(req.context.taste_profile or traveler.taste_profile or {}), **regenerate["taste"]}
+            updates = {k: regenerate[k] for k in ("min_rating", "max_price_level", "open_now") if k in regenerate}
+            new_req = req.context.model_copy(update={**updates, "taste_profile": taste or None, "language": req.language})
+            plan = _generate(new_req, db)
+            applied.append("Built a new plan" if en else "Armé un plan nuevo")
+            return ChatResponse(reply=reply, plan=plan, plan_changed=True, applied=applied)
+
+    return ChatResponse(reply=reply, plan=_trip_plan_to_response(trip_plan), plan_changed=bool(applied), applied=applied)
+
+
+def _weather_for_plan(trip_plan: TripPlan):
+    stops = _plan_stops_as_dicts(trip_plan)
+    if not stops:
+        return [], []
+    lat = sum(s["place"]["latitude"] for s in stops) / len(stops)
+    lon = sum(s["place"]["longitude"] for s in stops) / len(stops)
+    forecast = fetch_daily_forecast(lat, lon, max(s["day_number"] for s in stops))
+    return forecast, outdoor_stops_on_rainy_days(stops, forecast)
+
+
+@router.get("/{plan_id}/weather", response_model=WeatherOut)
+def get_plan_weather(plan_id: str, db: Session = Depends(get_db)) -> WeatherOut:
+    trip_plan = repository.get_trip_plan(db, plan_id)
+    if trip_plan is None:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    forecast, at_risk = _weather_for_plan(trip_plan)
+    return WeatherOut(
+        available=bool(forecast),
+        forecast=[WeatherDayOut(**f) for f in forecast],
+        at_risk=[
+            AtRiskStopOut(day_number=s["day_number"], place_id=s["place"]["id"], name=s["place"]["name"]) for s in at_risk
+        ],
+    )
+
+
+@router.post("/{plan_id}/weather-adjust", response_model=PlanResponse)
+def adjust_plan_for_weather(plan_id: str, db: Session = Depends(get_db)) -> PlanResponse:
+    """Quita las paradas al aire libre de los días con lluvia probable. Las
+    demás paradas conservan su día."""
+    trip_plan = repository.get_trip_plan(db, plan_id)
+    if trip_plan is None:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+    _, at_risk = _weather_for_plan(trip_plan)
+    if at_risk:
+        trip_plan = repository.drop_stops(db, trip_plan, [s["place"]["id"] for s in at_risk])
+        repository.log_agent_event(
+            db, trip_plan.traveler_id, "weather", "ajuste_clima", {"plan_id": plan_id, "removed": [s["place"]["name"] for s in at_risk]}
+        )
+    return _trip_plan_to_response(trip_plan)

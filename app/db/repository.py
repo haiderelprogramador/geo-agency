@@ -8,7 +8,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents.scheduling import assign_schedule
+from app.agents.routing import plan_itinerary
 from app.agents.state import Place as PlaceState
 from app.db.models import AgentEventLog, Feedback, Place as PlaceModel
 from app.db.models import PlanStop, Traveler, TripPlan
@@ -93,6 +93,7 @@ def save_trip_plan(db: Session, traveler_id: str, city: str, plan_stops: list[di
                 day_number=stop["day_number"],
                 order_index=stop["order_index"],
                 scheduled_time=stop.get("scheduled_time"),
+                travel_minutes=stop.get("travel_minutes"),
                 reason=stop["place"].get("reason"),
                 score=stop["place"].get("score"),
                 review_sentiment=stop["place"].get("review_sentiment"),
@@ -148,6 +149,7 @@ def replace_trip_plan_stops(db: Session, trip_plan: TripPlan, plan_stops: list[d
                 day_number=stop["day_number"],
                 order_index=stop["order_index"],
                 scheduled_time=stop.get("scheduled_time"),
+                travel_minutes=stop.get("travel_minutes"),
                 reason=stop["place"].get("reason"),
                 score=stop["place"].get("score"),
                 review_sentiment=stop["place"].get("review_sentiment"),
@@ -176,20 +178,27 @@ def stop_to_place_dict(stop: PlanStop) -> dict:
     }
 
 
+def drop_stops(db: Session, trip_plan: TripPlan, place_external_ids: list[str]) -> TripPlan:
+    """Quita paradas SIN cambiar de día a las demás: cada una conserva su
+    día y solo se reordena/recalcula el horario dentro de ese día."""
+    drop = set(place_external_ids)
+    survivors = [s for s in trip_plan.stops if s.place.external_id not in drop]
+    by_day: dict[int, list[PlanStop]] = {}
+    for s in sorted(survivors, key=lambda s: (s.day_number, s.order_index)):
+        by_day.setdefault(s.day_number, []).append(s)
+    stops = [
+        {"day_number": day, "order_index": i, "place": stop_to_place_dict(stop)}
+        for day, day_stops in by_day.items()
+        for i, stop in enumerate(day_stops)
+    ]
+    return replace_trip_plan_stops(db, trip_plan, plan_itinerary(stops, optimize=False))
+
+
 def remove_stop(db: Session, trip_plan: TripPlan, place_external_id: str) -> TripPlan:
     """RF6: el usuario quita una parada a mano (distinto de un lugar que se
     reporta cerrado, PlanContextSubject — ahí sí queda marcado globalmente;
-    acá solo se saca de ESTE plan)."""
-    days = max((s.day_number for s in trip_plan.stops), default=1)
-    survivors = [
-        stop_to_place_dict(s)
-        for s in sorted(trip_plan.stops, key=lambda s: (s.day_number, s.order_index))
-        if s.place.external_id != place_external_id
-    ]
-    new_stops = assign_schedule(
-        [{"day_number": (i % days) + 1, "order_index": i // days, "place": p} for i, p in enumerate(survivors)]
-    )
-    return replace_trip_plan_stops(db, trip_plan, new_stops)
+    acá solo se saca de ESTE plan). Las demás paradas conservan su día."""
+    return drop_stops(db, trip_plan, [place_external_id])
 
 
 def reorder_stops(db: Session, trip_plan: TripPlan, ordered_place_external_ids: list[str]) -> TripPlan:
@@ -206,8 +215,9 @@ def reorder_stops(db: Session, trip_plan: TripPlan, ordered_place_external_ids: 
         raise ValueError("El nuevo orden debe incluir todas las paradas del plan, sin repetir.")
 
     ordered_places = [stop_to_place_dict(by_external_id[pid]) for pid in ordered_place_external_ids]
-    new_stops = assign_schedule(
-        [{"day_number": (i % days) + 1, "order_index": i // days, "place": p} for i, p in enumerate(ordered_places)]
+    new_stops = plan_itinerary(
+        [{"day_number": (i % days) + 1, "order_index": i // days, "place": p} for i, p in enumerate(ordered_places)],
+        optimize=False,  # la persona eligió este orden a mano
     )
     return replace_trip_plan_stops(db, trip_plan, new_stops)
 

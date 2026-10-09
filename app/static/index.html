@@ -268,6 +268,30 @@
   }
   .geo-row > div { flex: 1; }
   #geoStatus { color: var(--muted); font-size: 0.78rem; margin-top: 4px; min-height: 1em; }
+  .weather-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .weather-chip {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 6px 10px; font-size: 0.78rem; color: var(--muted);
+  }
+  .weather-chip.rainy { border-color: rgba(122, 211, 255, 0.5); color: var(--accent-2); }
+  .weather-alert {
+    background: rgba(122, 211, 255, 0.08); border: 1px solid rgba(122, 211, 255, 0.35);
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; font-size: 0.85rem;
+    display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  }
+  .route-legend { color: var(--muted); font-size: 0.78rem; margin: -8px 0 14px; }
+  .chat { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 16px; }
+  .chat h3 { margin: 0 0 4px; font-size: 1rem; }
+  .chat-hint { color: var(--muted); font-size: 0.78rem; margin-bottom: 10px; }
+  .chat-log { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; max-height: 260px; overflow-y: auto; }
+  .bubble { padding: 8px 12px; border-radius: 12px; font-size: 0.88rem; max-width: 85%; line-height: 1.35; }
+  .bubble.user { align-self: flex-end; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #0b1020; }
+  .bubble.agent { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); }
+  .bubble .applied { display: block; margin-top: 4px; font-size: 0.74rem; color: var(--good); }
+  .chat-form { display: flex; gap: 8px; }
+  .chat-form input { flex: 1; }
+  .chat-voice { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.78rem; color: var(--muted); }
+  .chat-voice input { width: auto; }
   .section-label {
     font-size: 0.78rem;
     color: var(--muted);
@@ -472,7 +496,7 @@ async function api(path, options) {
   return res.json();
 }
 
-async function generatePlan() {
+function buildSearchPayload() {
   const travelerId = document.getElementById("travelerId").value.trim() || "demo";
   const payload = {
     traveler_id: travelerId,
@@ -489,7 +513,12 @@ async function generatePlan() {
   const maxPriceLevel = document.getElementById("maxPriceLevel").value;
   if (maxPriceLevel !== "") payload.max_price_level = parseInt(maxPriceLevel, 10);
   if (document.getElementById("openNow").value === "true") payload.open_now = true;
+  return payload;
+}
 
+async function generatePlan() {
+  const payload = buildSearchPayload();
+  const travelerId = payload.traveler_id;
   setBusy(true);
   setStatus("Generando plan (puede tardar unos segundos — consulta Google Places y analiza reseñas)...");
   try {
@@ -582,6 +611,7 @@ function renderPlan(plan) {
           <div class="badges">
             <span class="badge day">Día ${stop.day_number}</span>
             ${stop.scheduled_time ? `<span class="badge">🕒 ${stop.scheduled_time}</span>` : ""}
+            ${stop.travel_minutes ? `<span class="badge">🚗 ${stop.travel_minutes} min desde la anterior</span>` : ""}
             <span class="badge">${p.category}</span>
             <span class="badge">★ ${p.avg_rating ?? "—"}</span>
             <span class="badge ${sentimentClass}">${sentimentLabel(p.review_sentiment)}</span>
@@ -606,14 +636,29 @@ function renderPlan(plan) {
         <span class="plan-id">${plan.plan_id}</span>
       </div>
       <div class="profile-row">${profileHtml}</div>
+      <div id="weatherBox"></div>
       <div class="actions" style="margin-top: 0; margin-bottom: 16px;">
         <button class="btn-ghost btn-sm" id="narrateBtn" onclick="toggleNarration()">🔊 Narrar mi plan</button>
       </div>
       <div id="map"></div>
+      <div class="route-legend" id="routeLegend"></div>
       ${stopsHtml}
+      <div class="chat">
+        <h3>💬 Habla con tu agente</h3>
+        <div class="chat-hint">Prueba: “quita el museo”, “nada de naturaleza”, “algo más barato” o “quiero más gastronomía”.</div>
+        <div class="chat-log" id="chatLog"></div>
+        <form class="chat-form" onsubmit="sendChat(event)">
+          <input id="chatInput" placeholder="Escríbele a tu agente..." autocomplete="off" />
+          <button class="btn-primary" id="chatSend" type="submit">Enviar</button>
+        </form>
+        <label class="chat-voice"><input type="checkbox" id="chatVoice" ${window.__chatVoice !== false ? "checked" : ""} onchange="window.__chatVoice = this.checked" /> Que me responda con voz</label>
+      </div>
     </div>`;
 
   updateMap(plan.stops);
+  drawRoutes(plan.plan_id);
+  loadWeather(plan.plan_id);
+  renderChatLog();
 }
 
 function updateMap(stops) {
@@ -645,10 +690,10 @@ function updateMap(stops) {
   });
 
   if (markers.length === 1) {
-    map.setView([stops[0].place.latitude, stops[0].place.longitude], 15);
+    map.setView([stops[0].place.latitude, stops[0].place.longitude], 15, { animate: false });
   } else {
     const group = L.featureGroup(markers);
-    map.fitBounds(group.getBounds().pad(0.2));
+    map.fitBounds(group.getBounds().pad(0.2), { animate: false });
   }
 }
 
@@ -708,6 +753,121 @@ async function removeStop(placeId) {
   }
 }
 
+// --- Ruta real en el mapa ---------------------------------------------------
+const DAY_COLORS = ["#5b8cff", "#ff9f5b", "#4fd18b", "#d98cff", "#ffd45b", "#ff6b9d", "#5bd9d9"];
+
+async function drawRoutes(planId) {
+  const map = window.__leafletMap; // el mapa de ESTE dibujo; si se reemplaza mientras llega la ruta, se descarta
+  try {
+    const routes = await api(`/plan/${planId}/route`);
+    if (!map || map !== window.__leafletMap || planId !== currentPlanId) return;
+    const lines = routes.map((r) =>
+      L.polyline(r.geometry, { color: DAY_COLORS[(r.day_number - 1) % DAY_COLORS.length], weight: 4, opacity: 0.85 }).addTo(map)
+    );
+    const legend = document.getElementById("routeLegend");
+    if (legend) {
+      const approx = routes.some((r) => r.source !== "osrm");
+      legend.innerHTML = routes
+        .map((r) => `<span style="color:${DAY_COLORS[(r.day_number - 1) % DAY_COLORS.length]}">●</span> Día ${r.day_number}: ${r.total_travel_minutes} min de traslado`)
+        .join(" &nbsp;·&nbsp; ") + (approx ? " &nbsp;·&nbsp; <i>ruta aproximada</i>" : "");
+    }
+    if (lines.length) map.fitBounds(L.featureGroup(lines).getBounds().pad(0.15), { animate: false });
+  } catch (err) {
+    /* la ruta es un extra: si falla, el plan sigue funcionando */
+  }
+}
+
+// --- Clima -------------------------------------------------------------------
+async function loadWeather(planId) {
+  window.__weather = null;
+  try {
+    const w = await api(`/plan/${planId}/weather`);
+    if (planId !== currentPlanId || !w.available) return;
+    window.__weather = w;
+    const box = document.getElementById("weatherBox");
+    if (!box) return;
+    const chips = w.forecast.map((f) =>
+      `<span class="weather-chip ${f.rainy ? "rainy" : ""}">Día ${f.day_number} ${f.rainy ? "🌧️" : "☀️"} ${f.rain_probability ?? "?"}% lluvia · ${f.temp_max ?? "?"}°</span>`
+    ).join("");
+    const alert = w.at_risk.length
+      ? `<div class="weather-alert"><span>🌧️ Se espera lluvia y tienes paradas al aire libre: <b>${w.at_risk.map((r) => `${r.name} (día ${r.day_number})`).join(", ")}</b>.</span>
+           <button class="btn-sm btn-closed" onclick="adjustForWeather()">Quitar paradas al aire libre</button></div>`
+      : "";
+    box.innerHTML = `<div class="weather-row">${chips}</div>${alert}`;
+  } catch (err) {
+    /* sin clima el plan sigue igual */
+  }
+}
+
+async function adjustForWeather() {
+  setStatus("Ajustando el plan por el clima...");
+  try {
+    const plan = await api(`/plan/${currentPlanId}/weather-adjust`, { method: "POST" });
+    renderPlan(plan);
+    setStatus("Plan ajustado: quité las paradas al aire libre de los días con lluvia.", "ok");
+  } catch (err) {
+    setStatus("Error: " + err.message, "error");
+  }
+}
+
+// --- Chat con el agente --------------------------------------------------------
+let chatLog = []; // [{role: "user"|"agent", text, applied: []}]
+
+function escapeHtml(text) {
+  const d = document.createElement("div");
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+function renderChatLog() {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  log.innerHTML = chatLog.map((m) =>
+    `<div class="bubble ${m.role}">${escapeHtml(m.text)}${m.applied && m.applied.length ? `<span class="applied">✓ ${m.applied.map(escapeHtml).join(" · ")}</span>` : ""}</div>`
+  ).join("");
+  log.scrollTop = log.scrollHeight;
+}
+
+function speak(text, lang) {
+  if (!window.speechSynthesis || !text) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang;
+  window.speechSynthesis.speak(u);
+}
+
+async function sendChat(event) {
+  event.preventDefault();
+  const input = document.getElementById("chatInput");
+  const message = input.value.trim();
+  if (!message || !currentPlanId) return;
+  const language = document.getElementById("language").value;
+  chatLog.push({ role: "user", text: message });
+  input.value = "";
+  renderChatLog();
+  document.getElementById("chatSend").disabled = true;
+  try {
+    const res = await api(`/plan/${currentPlanId}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ message, language, context: buildSearchPayload() }),
+    });
+    chatLog.push({ role: "agent", text: res.reply, applied: res.applied });
+    if (res.plan_changed) {
+      currentTravelerId = res.plan.traveler_id || currentTravelerId;
+      localStorage.setItem("geo_travel_last_plan", JSON.stringify({ planId: res.plan.plan_id, travelerId: currentTravelerId }));
+    }
+    const shouldSpeak = window.__chatVoice !== false;
+    renderPlan(res.plan); // vuelve a dibujar el plan (y el chat con su historial)
+    if (shouldSpeak) speak(res.reply, language === "en" ? "en-US" : "es-ES");
+  } catch (err) {
+    chatLog.push({ role: "agent", text: "Error: " + err.message });
+    renderChatLog();
+  } finally {
+    const send = document.getElementById("chatSend");
+    if (send) send.disabled = false;
+  }
+}
+
 // --- Narración del plan (texto a voz del navegador, sin servicios pagos) ---
 // El agente ya genera una "reason" explicando por qué eligió cada lugar
 // (ver app/agents/nodes.py _explain, RF9/RF11); esto arma esas razones en
@@ -720,6 +880,8 @@ const NARRATION_STRINGS = {
       `Este es tu plan para ${city}: ${stops} ${stops === 1 ? "lugar" : "lugares"} en ${days} ${days === 1 ? "día" : "días"}.`,
     day: (n) => `Día ${n}.`,
     timeRange: (start, end) => `De ${start} a ${end},`,
+    withTravel: (minutes) => `Después de ${minutes} minutos de traslado,`,
+    rainy: (prob) => `Ojo: hay ${prob} por ciento de probabilidad de lluvia ese día.`,
     noTime: "Luego,",
     noReason: "un lugar que te puede gustar.",
     outro: "Eso es todo. ¡Buen viaje!",
@@ -729,6 +891,8 @@ const NARRATION_STRINGS = {
       `Here's your plan for ${city}: ${stops} ${stops === 1 ? "place" : "places"} over ${days} ${days === 1 ? "day" : "days"}.`,
     day: (n) => `Day ${n}.`,
     timeRange: (start, end) => `From ${start} to ${end},`,
+    withTravel: (minutes) => `After a ${minutes} minute transfer,`,
+    rainy: (prob) => `Heads up: ${prob} percent chance of rain that day.`,
     noTime: "Then,",
     noReason: "a place you might enjoy.",
     outro: "That's the whole plan. Have a great trip!",
@@ -758,12 +922,15 @@ function buildNarrationScript(plan) {
   for (const dayNum of Object.keys(byDay).sort((a, b) => a - b)) {
     const dayStops = byDay[dayNum].sort((a, b) => a.order_index - b.order_index);
     parts.push(t.day(dayNum));
+    const dayWeather = window.__weather && window.__weather.forecast.find((f) => f.day_number === Number(dayNum));
+    if (dayWeather && dayWeather.rainy) parts.push(t.rainy(dayWeather.rain_probability));
     dayStops.forEach((stop) => {
       let connector = t.noTime;
       if (stop.scheduled_time && stop.scheduled_time.includes("-")) {
         const [start, end] = stop.scheduled_time.split("-");
         connector = t.timeRange(spokenHour(start), spokenHour(end));
       }
+      if (stop.travel_minutes) connector = `${t.withTravel(stop.travel_minutes)} ${connector.charAt(0).toLowerCase()}${connector.slice(1)}`;
       const reason = stop.place.reason || `${stop.place.name}: ${t.noReason}`;
       parts.push(`${connector} ${reason}`);
     });

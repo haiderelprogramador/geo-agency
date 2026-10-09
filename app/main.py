@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.plan import router as plan_router
 from app.api.travelers import router as travelers_router
 from app.db import models  # noqa: F401 - registra las tablas en Base.metadata
-from app.db.session import Base, get_engine
+from app.db.session import Base, ensure_columns, get_engine
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -19,6 +19,7 @@ async def lifespan(app: FastAPI):
     # para el alcance actual basta con crear las tablas que falten al
     # arrancar. No borra ni migra datos existentes.
     Base.metadata.create_all(bind=get_engine())
+    ensure_columns(get_engine())
     yield
 
 

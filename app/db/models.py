@@ -101,6 +101,7 @@ class PlanStop(Base):
     day_number: Mapped[int] = mapped_column(default=1)
     order_index: Mapped[int] = mapped_column(default=0)
     scheduled_time: Mapped[str | None] = mapped_column(String(20), nullable=True)  # "09:00-10:30"
+    travel_minutes: Mapped[int | None] = mapped_column(nullable=True)  # traslado desde la parada anterior del día
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)  # explicación (RF9)
     # Snapshot del momento del plan: el score y el sentimiento dependen del
     # perfil de gustos de ESE plan y de las reseñas vigentes en ese momento,
